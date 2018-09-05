@@ -5,6 +5,7 @@ import * as events from 'events'
 import * as process from 'process'
 import * as crypto from 'crypto'
 import * as stream from 'stream'
+import { EventEmitter } from 'events'
 
 import { Ubjson, UbjsonDecoder } from '@shelacek/ubjson'
 
@@ -12,6 +13,8 @@ import { Ubjson, UbjsonDecoder } from '@shelacek/ubjson'
 
 import * as imageType from 'image-type'
 import { RingBuffer } from './ringBuffer'
+
+
 
 const dumpTextures = (textures: object) => {
   const parsedTextures = {}
@@ -37,15 +40,20 @@ const dumpTextures = (textures: object) => {
   });
 }
 
-class ApiTraceStateWritable extends stream.Writable {
+class ApiTraceStateDuplex extends stream.Duplex {
   writable = true
 
-  private decoder = new UbjsonDecoder()
+  private decoder = new UbjsonDecoder({
+    int64Handling: 'raw'
+  })
   private buffer = new RingBuffer(10 * 1024 * 1024)
   private payloadSize = -1
+  private states = []
 
   constructor() {
-    super()
+    super({
+      readableObjectMode: true
+    })
   }
 
   _write(chunk, encoding, cb) {
@@ -80,11 +88,18 @@ class ApiTraceStateWritable extends stream.Writable {
 
   _payload(payload, cb) {
     const state = this.decoder.decode(payload)
-    console.log(state)
+    //console.log(state)
+    this.states.push(state)
     cb()
   }
-}
 
+  _read(size) {
+    console.log(`read(${size})`)
+    const res = this.states.shift()
+    console.log(res)
+    this.push(res)
+  }
+}
 
 if (require.main === module) {
   let stdin: stream.Readable = process.stdin
@@ -92,7 +107,9 @@ if (require.main === module) {
     stdin = fs.createReadStream('500.ubj')
   }
 
-  const writable = new ApiTraceStateWritable()
+  const writable = new ApiTraceStateDuplex()
   stdin.pipe(writable)
+  writable.on('data', (s) => dumpTextures(s.textures))
+  writable.on('data', (s) => dumpTextures(s.framebuffer))
   stdin.resume()
 }

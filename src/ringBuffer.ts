@@ -16,7 +16,7 @@ export class RingBuffer {
     if (!this.canPut(buffer.length)) this.compact()
     if (!this.canPut(buffer.length)) return false
     buffer.copy(this._buffer, this._position + this._remaining)
-    this._buffer += buffer.length
+    this._remaining += buffer.length
     return true
   }
 
