@@ -16,39 +16,39 @@ import { RingBuffer } from './ringBuffer'
 
 
 
+const parsedTextures = {}
 const dumpTextures = (textures: object) => {
-  const parsedTextures = {}
   Object.keys(textures).forEach(key => {
-    console.log(`${key}`)
+    //console.debug(`${key}`)
     const tex = textures[key]
     const data = Buffer.from(tex['__data__'], 'base64')
     const hash = crypto.createHash('sha256')
     hash.update(data)
     const digest = hash.digest('hex')
-    console.log(digest)
 
-    if (!(digest in parsedTextures)) {
-      console.log(digest)
+    if (parsedTextures[digest]) {
+      return
     }
     parsedTextures[digest] = true
 
     const it = imageType(data)
-    console.log(it)
-    fs.writeFileSync(`out/${digest}.${it.ext}`, data)
+    const name = `${digest}.${it.ext}`
+    console.log(name)
+    fs.writeFileSync(`out/${name}`, data)
 
     //console.log(data.slice(0, 2))
   });
 }
 
-class ApiTraceStateDuplex extends stream.Duplex {
-  writable = true
+const decoder = new UbjsonDecoder({
+  int64Handling: 'raw',
+  highPrecisionNumberHandling: 'raw'
+})
 
-  private decoder = new UbjsonDecoder({
-    int64Handling: 'raw'
-  })
-  private buffer = new RingBuffer(10 * 1024 * 1024)
+class ApiTraceStateDuplex extends stream.Transform {
+  private buffer = new RingBuffer(1024 * 1024)
   private payloadSize = -1
-  private states = []
+  private frame = 0
 
   constructor() {
     super({
@@ -56,25 +56,47 @@ class ApiTraceStateDuplex extends stream.Duplex {
     })
   }
 
-  _write(chunk, encoding, cb) {
-    console.log(`data: ${chunk.length}`)
+  _transform(chunk, encoding, cb) {
+    // console.debug(`data: ${chunk.length}`)
     if (!chunk || !(chunk instanceof Buffer)) {
       cb(new Error('chunk is not Buffer'))
     } else {
       this.buffer.put(chunk)
 
-      if (this.payloadSize < 0) {
-        if (this.buffer.remaining() >= 4) {
-          this.payloadSize = this.buffer.get(4).readInt32BE(0)
-          chunk = chunk.slice(4)
+      while (this.canParse) {
+        if (this.payloadSize < 0) {
+          if (this.buffer.remaining() >= 4) {
+            this.payloadSize = this.buffer.get(4).readInt32BE(0)
+          }
         }
-      }
 
-      if (this.payloadSize >= 0) {
-        if (this.buffer.remaining() >= this.payloadSize) {
-          const payload = this.buffer.get(this.payloadSize)
-          return this._payload(payload, cb)
-          this.payloadSize = -1
+        if (this.payloadSize >= 0) {
+          if (this.buffer.remaining() >= this.payloadSize) {
+            // console.debug(`payload: ${this.payloadSize} remaining: ${this.buffer.remaining()}`)
+
+            const payload = this.buffer.get(this.payloadSize)
+
+            const hash = crypto.createHash('sha256')
+            hash.update(payload)
+            const digest = hash.digest('hex')
+            //console.debug(digest)
+
+            let state
+            try {
+              state = decoder.decode(payload)
+            } catch (err) {
+              console.log(`failed to decode payload at frame ${this.frame}`, err)
+              const b = Buffer.alloc(4 + this.payloadSize)
+              b.writeInt32BE(this.payloadSize, 0)
+              payload.copy(b, 4, 0, this.payloadSize)
+              fs.writeFileSync('corrupted.ubj', b)
+              cb(err)
+              return
+            }
+            this.payloadSize = -1
+            this.frame += 1
+            this.push(state)
+          }
         }
       }
 
@@ -82,34 +104,21 @@ class ApiTraceStateDuplex extends stream.Duplex {
     }
   }
 
-  end(chunk) {
-    if (chunk) this._write(chunk, undefined, () => undefined)
-  }
-
-  _payload(payload, cb) {
-    const state = this.decoder.decode(payload)
-    //console.log(state)
-    this.states.push(state)
-    cb()
-  }
-
-  _read(size) {
-    console.log(`read(${size})`)
-    const res = this.states.shift()
-    console.log(res)
-    this.push(res)
+  get canParse() {
+    return (this.payloadSize < 0 && this.buffer.remaining() >= 4)
+      || (this.payloadSize >= 0 && this.buffer.remaining() >= this.payloadSize)
   }
 }
 
 if (require.main === module) {
   let stdin: stream.Readable = process.stdin
-  if (true) {
-    stdin = fs.createReadStream('500.ubj')
+  if (false) {
+    stdin = fs.createReadStream('corrupt.ubj')
   }
 
   const writable = new ApiTraceStateDuplex()
   stdin.pipe(writable)
   writable.on('data', (s) => dumpTextures(s.textures))
-  writable.on('data', (s) => dumpTextures(s.framebuffer))
+  //writable.on('data', (s) => dumpTextures(s.framebuffer))
   stdin.resume()
 }

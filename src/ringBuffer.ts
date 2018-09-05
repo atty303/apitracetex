@@ -25,7 +25,7 @@ export class RingBuffer {
   }
 
   compact() {
-    this._buffer.copy(this._buffer, this._position, this._position + this._remaining)
+    this._buffer.copy(this._buffer, 0, this._position, this._position + this._remaining)
     this._position = 0
   }
 
@@ -38,7 +38,7 @@ export class RingBuffer {
     const state = this.peek(length)
     if (state) {
       this._position += length
-      this._remaining += length
+      this._remaining -= length
     }
     return state
   }
