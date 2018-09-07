@@ -19,7 +19,6 @@ import { RingBuffer } from './ringBuffer'
 const parsedTextures = {}
 const dumpTextures = (textures: object) => {
   Object.keys(textures).forEach(key => {
-    //console.debug(`${key}`)
     const tex = textures[key]
     const data = Buffer.from(tex['__data__'], 'base64')
     const hash = crypto.createHash('sha256')
@@ -31,6 +30,7 @@ const dumpTextures = (textures: object) => {
     }
     parsedTextures[digest] = true
 
+    console.debug(`${key}`)
     const it = imageType(data)
     const name = `${digest}.${it.ext}`
     console.log(name)
@@ -46,7 +46,7 @@ const decoder = new UbjsonDecoder({
 })
 
 class ApiTraceStateDuplex extends stream.Transform {
-  private buffer = new RingBuffer(1024 * 1024)
+  private buffer = new RingBuffer(100 * 1024 * 1024)
   private payloadSize = -1
   private frame = 0
 
@@ -57,7 +57,7 @@ class ApiTraceStateDuplex extends stream.Transform {
   }
 
   _transform(chunk, encoding, cb) {
-    // console.debug(`data: ${chunk.length}`)
+    //console.debug(`data: ${chunk.length}`)
     if (!chunk || !(chunk instanceof Buffer)) {
       cb(new Error('chunk is not Buffer'))
     } else {
